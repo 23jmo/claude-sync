@@ -7,13 +7,13 @@ Sync skills, plugins, and extensions between Claude Code and Claude Desktop.
 Run directly without installing:
 
 ```bash
-bunx claude-sync
+bunx @23jmo/claude-sync
 ```
 
 Or install globally:
 
 ```bash
-bun install -g claude-sync
+bun install -g @23jmo/claude-sync
 ```
 
 ## Features
@@ -32,7 +32,7 @@ bun install -g claude-sync
 Simply run:
 
 ```bash
-bunx claude-sync
+bunx @23jmo/claude-sync
 ```
 
 You'll see an interactive menu:

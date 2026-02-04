@@ -1,5 +1,5 @@
 {
-  "name": "claude-sync",
+  "name": "@23jmo/claude-sync",
   "version": "1.0.0",
   "description": "Sync skills, plugins, and extensions between Claude Code and Claude Desktop",
   "type": "module",
