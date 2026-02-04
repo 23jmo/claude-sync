@@ -1,5 +1,7 @@
+import { spawn } from "child_process";
+import { join } from "path";
+import { existsSync, realpathSync, statSync, readdirSync } from "fs";
 import type { ScannedItem, SyncManifest, SyncDirection, SyncItem } from "../types";
-import { convertSkillToDxt } from "../transform/skill-to-dxt";
 import { convertDxtToSkill, addMcpServerToSettings } from "../transform/dxt-to-skill";
 import { syncMcpServers, getMcpServerDiff } from "../transform/mcp-config";
 import { lookupInRegistry } from "../transform/registry";
@@ -13,6 +15,65 @@ export interface SyncResult {
   skipped: Array<{ id: string; reason: string }>;
   errors: Array<{ id: string; error: string }>;
   registryRecommendations: Array<{ id: string; extensionId: string }>;
+}
+
+interface OpenSkillResult {
+  success: boolean;
+  skillPath?: string;
+  error?: string;
+}
+
+async function openSkillWithClaudeApp(item: ScannedItem): Promise<OpenSkillResult> {
+  // Resolve symlinks to get the real path
+  const stat = statSync(item.path, { throwIfNoEntry: false });
+  if (!stat) {
+    return { success: false, error: "Skill path does not exist" };
+  }
+
+  const realPath = stat.isSymbolicLink() ? realpathSync(item.path) : item.path;
+
+  // Find the skill file to open - prefer .skill files, fallback to SKILL.md
+  let skillFilePath: string | undefined;
+
+  // Check for .skill file in the directory
+  if (existsSync(realPath) && statSync(realPath).isDirectory()) {
+    const files = readdirSync(realPath);
+    const skillFile = files.find((f) => f.endsWith(".skill"));
+    if (skillFile) {
+      skillFilePath = join(realPath, skillFile);
+    } else if (existsSync(join(realPath, "SKILL.md"))) {
+      skillFilePath = join(realPath, "SKILL.md");
+    }
+  } else if (realPath.endsWith(".skill") || realPath.endsWith("SKILL.md")) {
+    skillFilePath = realPath;
+  }
+
+  if (!skillFilePath || !existsSync(skillFilePath)) {
+    return { success: false, error: "No .skill or SKILL.md file found" };
+  }
+
+  // Open with Claude Desktop app
+  return new Promise((resolve) => {
+    const child = spawn("open", ["-a", "Claude", skillFilePath!], {
+      stdio: "ignore",
+      detached: true,
+    });
+
+    child.on("error", (err) => {
+      resolve({ success: false, error: `Failed to open Claude app: ${err.message}` });
+    });
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ success: true, skillPath: skillFilePath });
+      } else {
+        resolve({ success: false, error: `Claude app exited with code ${code}` });
+      }
+    });
+
+    // Unref so the parent process can exit independently
+    child.unref();
+  });
 }
 
 export async function executeSync(
@@ -67,22 +128,14 @@ export async function executeSync(
           }
         }
 
-        // Convert skill/plugin to DXT
+        // Open skill with Claude Desktop app
         if (item.type === "skill") {
-          const conversionResult = convertSkillToDxt(item);
+          const openResult = await openSkillWithClaudeApp(item);
 
-          if (conversionResult.skipped) {
-            result.skipped.push({
-              id: item.id,
-              reason: conversionResult.skipReason || "Unknown",
-            });
-            continue;
-          }
-
-          if (!conversionResult.success) {
+          if (!openResult.success) {
             result.errors.push({
               id: item.id,
-              error: conversionResult.error || "Conversion failed",
+              error: openResult.error || "Failed to open with Claude app",
             });
             continue;
           }
@@ -97,7 +150,7 @@ export async function executeSync(
             sourcePath: item.path,
             sourceHash: item.hash,
             targetApp: "desktop",
-            targetPath: conversionResult.outputPath,
+            targetPath: openResult.skillPath,
             status: "synced",
             lastSynced: new Date().toISOString(),
           };

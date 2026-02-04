@@ -25,24 +25,65 @@ function scanClaudeCode(): ScannedItem[] {
 
   // Scan skills
   if (existsSync(PATHS.claudeCode.skills)) {
-    const skillDirs = readdirSync(PATHS.claudeCode.skills);
-    for (const dir of skillDirs) {
-      if (dir.startsWith(".")) continue;
-      const skillPath = join(PATHS.claudeCode.skills, dir);
+    const skillEntries = readdirSync(PATHS.claudeCode.skills);
+    for (const entry of skillEntries) {
+      if (entry.startsWith(".")) continue;
+      const skillPath = join(PATHS.claudeCode.skills, entry);
       const stat = statSync(skillPath);
 
+      // Handle .skill files directly
+      if (stat.isFile() && entry.endsWith(".skill")) {
+        const name = entry.replace(/\.skill$/, "");
+        items.push({
+          id: `skill:${name}`,
+          type: "skill",
+          name,
+          displayName: extractSkillDisplayNameFromFile(skillPath) || name,
+          path: skillPath,
+          hash: hashFile(skillPath),
+          app: "code",
+          metadata: {
+            isSkillFile: true,
+          },
+        });
+        continue;
+      }
+
+      // Handle directories with SKILL.md
       if (stat.isDirectory() || stat.isSymbolicLink()) {
         // Follow symlinks
         const realPath = stat.isSymbolicLink() ? realpathSync(skillPath) : skillPath;
 
         if (existsSync(realPath) && statSync(realPath).isDirectory()) {
+          // Check for .skill file in directory first
+          const skillFiles = readdirSync(realPath).filter((f) => f.endsWith(".skill"));
+          if (skillFiles.length > 0) {
+            const skillFilePath = join(realPath, skillFiles[0]);
+            items.push({
+              id: `skill:${entry}`,
+              type: "skill",
+              name: entry,
+              displayName: extractSkillDisplayNameFromFile(skillFilePath) || entry,
+              path: skillFilePath,
+              hash: hashFile(skillFilePath),
+              app: "code",
+              metadata: {
+                isSkillFile: true,
+                isSymlink: stat.isSymbolicLink(),
+                realPath: stat.isSymbolicLink() ? realPath : undefined,
+              },
+            });
+            continue;
+          }
+
+          // Fall back to SKILL.md
           const skillMd = join(realPath, "SKILL.md");
           if (existsSync(skillMd)) {
             items.push({
-              id: `skill:${dir}`,
+              id: `skill:${entry}`,
               type: "skill",
-              name: dir,
-              displayName: extractSkillDisplayName(skillMd) || dir,
+              name: entry,
+              displayName: extractSkillDisplayName(skillMd) || entry,
               path: skillPath,
               hash: hashDirectory(realPath),
               app: "code",
@@ -180,6 +221,21 @@ function extractSkillDisplayName(skillMdPath: string): string | undefined {
     const content = readFileSync(skillMdPath, "utf-8");
     const match = content.match(/^#\s+(.+)$/m);
     return match ? match[1].trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractSkillDisplayNameFromFile(skillFilePath: string): string | undefined {
+  try {
+    const content = readFileSync(skillFilePath, "utf-8");
+    // Try to find a title in the first heading
+    const match = content.match(/^#\s+(.+)$/m);
+    if (match) return match[1].trim();
+    // Try to find name in frontmatter-style format
+    const nameMatch = content.match(/^name:\s*(.+)$/m);
+    if (nameMatch) return nameMatch[1].trim();
+    return undefined;
   } catch {
     return undefined;
   }
